@@ -12,6 +12,7 @@ typedef struct KruskalModel_
     IType rank;
     FType **U;     // Kruskal factors, I_n * rank
     FType *lambda; // rank * 1
+    FType** U_dev; // Kruskal factors on device
 } KruskalModel;
 
 typedef enum
@@ -31,7 +32,7 @@ void KruskalModelNorm(KruskalModel* M,
 
 void KruskalModelRandomInit(KruskalModel *M, unsigned int seed);
 
-void ExportKruskalModel(KruskalModel *M, char *file_path);
+void ExportKruskalModel(KruskalModel *M, const char *file_path);
 
 void DestroyKruskalModel(KruskalModel *M);
 
@@ -40,4 +41,11 @@ void PrintKruskalModel(KruskalModel *M);
 void RedistributeLambda (KruskalModel *M, int n);
 
 double KruskalTensorFit();
+
+// Replicates the Kruskal model on the device
+KruskalModel* make_device_copy(KruskalModel* M_host);
+
+// Destroys a Kruskal model stored on the device
+void destroy_kruskal_model_dev(KruskalModel* M_dev);
+
 #endif // KRUSKAL_MODEL_HPP_

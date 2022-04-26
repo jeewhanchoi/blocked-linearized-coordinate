@@ -26,31 +26,34 @@ typedef struct Interval_ {
 
 template <typename LIT>
 struct AltoTensor {
-    int nmode;                  // number of modes
-    int nprtn;                  // number of partitions
-    IType nnz;                  // number of nonzeros
-    IType *dims;                // dimensions
-    LIT alto_mask;
-    LIT *mode_masks;            // gather/scatter masks (nmode)
+    int nmode = 0;                  // number of modes
+    int nprtn = 0;                  // number of partitions
+    IType nnz = 0;                  // number of nonzeros
+    IType *dims = nullptr;                // dimensions
+    LIT alto_mask = 0;
+    LIT *mode_masks = nullptr;            // gather/scatter masks (nmode)
 #ifdef ALT_PEXT
-    int *mode_pos;              // starting point for each mode mask (nmode)
+    int *mode_pos = nullptr;              // starting point for each mode mask (nmode)
 #endif
-    LIT *idx;                   // ALTO index
-    FType *vals;                // nonzeros
+    LIT *idx = nullptr;                   // ALTO index
+    FType *vals = nullptr;                // nonzeros
 
-    IType *prtn_ptr;            // pointer to children nnzs
-    Interval *prtn_intervals;   // ALTO partition/subspace intervals (nprtn*nmode)
-    LIT alto_cr_mask;
-    LIT *cr_masks;              // optional conflict resolution masks (nmode)
+    IType *prtn_ptr = nullptr;            // pointer to children nnzs
+    Interval *prtn_intervals = nullptr;   // ALTO partition/subspace intervals (nprtn*nmode)
+    LIT alto_cr_mask = 0;
+    LIT *cr_masks = nullptr;              // optional conflict resolution masks (nmode)
 
 #ifdef OPT_ALTO
-    LPType *prtn_id;           // ALTO partition/subspace id
-    LPType *prtn_mask;
-    LPType *prtn_mode_masks;   // ALTO partition/subspace gather/scatter masks (nprtn*nmode)
+    LPType *prtn_id = nullptr;           // ALTO partition/subspace id
+    LPType *prtn_mask = nullptr;
+    LPType *prtn_mode_masks = nullptr;   // ALTO partition/subspace gather/scatter masks (nprtn*nmode)
 #endif
 };
 
 //Adaptive Linearized Tensor Order (ALTO) APIs
+template <typename LIT>
+static inline void gen_alto(SparseTensor *spt, AltoTensor<LIT> **at);
+
 template <typename LIT>
 static inline void create_alto(SparseTensor *spt, AltoTensor<LIT> **at, int nprtn);
 
@@ -85,7 +88,7 @@ typedef unsigned long long AddType;
 // worst case da_mem cost = 4 mem ops
 #define MIN_FIBER_REUSE 4
 // cr_bits can improve the performance when there is limited fiber reuse.
-#define GENERATE_CR_BITS
+//#define GENERATE_CR_BITS
 
 //ALTO currently supports multiple options:
 // 1) packing (LSB first or MSB first)
@@ -103,7 +106,7 @@ mttkrp_alto_da_mem_pull(int const target_mode, FType** factors, const AltoTensor
 
 template <typename LIT>
 static inline void
-create_alto(SparseTensor* spt, AltoTensor<LIT>** at, int nprtn)
+gen_alto(SparseTensor* spt, AltoTensor<LIT>** at)
 {
     //uint64_t ticks;
     double wtime_s, wtime;
@@ -116,7 +119,6 @@ create_alto(SparseTensor* spt, AltoTensor<LIT>** at, int nprtn)
     assert(_at);
 
     _at->nmode = nmode;
-    _at->nprtn = nprtn;
     _at->nnz = nnz;
 
     _at->dims = (IType*)AlignedMalloc(nmode * sizeof(IType));
@@ -131,36 +133,12 @@ create_alto(SparseTensor* spt, AltoTensor<LIT>** at, int nprtn)
     _at->mode_pos = (int*)AlignedMalloc(nmode * sizeof(int));
     assert(_at->mode_pos);
 #endif
-    
+
     _at->idx = (LIT*)AlignedMalloc(nnz * sizeof(LIT));
     assert(_at->idx);
 
     _at->vals = (FType*)AlignedMalloc(nnz * sizeof(FType));
     assert(_at->vals);
-
-    _at->prtn_ptr = (IType*)AlignedMalloc((nprtn + 1) * sizeof(IType));
-    assert(_at->prtn_ptr);
-
-    _at->prtn_intervals = (Interval*)AlignedMalloc(nprtn * nmode * sizeof(Interval));
-    assert(_at->prtn_intervals);
-
-    _at->cr_masks = (LIT*)AlignedMalloc(nmode * sizeof(LIT));
-    assert(_at->cr_masks);
-    memset(_at->cr_masks, 0, nmode * sizeof(LIT));
-
-#ifdef OPT_ALTO
-    _at->prtn_id = (LPType*)AlignedMalloc(nprtn * sizeof(LPType));
-    assert(_at->prtn_id);
-    memset(_at->prtn_id, 0, nprtn * sizeof(LPType));
-
-    _at->prtn_mask = (LPType*)AlignedMalloc(nprtn * sizeof(LPType));
-    assert(_at->prtn_mask);
-    memset(_at->prtn_mask, 0, nprtn * sizeof(LPType));
-
-    _at->prtn_mode_masks = (LPType*)AlignedMalloc(nprtn * nmode * sizeof(LPType));
-    assert(_at->prtn_mode_masks);
-    memset(_at->prtn_mode_masks, 0, nprtn * nmode * sizeof(LPType));
-#endif
 
     //Setup the linearization scheme.
     //ticks = ReadTSC();
@@ -198,53 +176,62 @@ create_alto(SparseTensor* spt, AltoTensor<LIT>** at, int nprtn)
     wtime = omp_get_wtime() - wtime_s;
     printf("ALTO: Linearization time = %f (s)\n", wtime);
 
-    //Sort the nonzeros based on their line position.  
+    //Sort the nonzeros based on their line position.
     wtime_s = omp_get_wtime();
     sort_alto(_at);
     wtime = omp_get_wtime() - wtime_s;
     printf("ALTO: sort time = %f (s)\n", wtime);
 
-#ifdef ALT_PEXT
-    //Re-encode the ALTO index.
+    *at = _at;
+}
 
-    //local buffer
-    int ALTO_POS[MAX_NUM_MODES];
-    for (int n = 0; n < nmode; ++n) {
-        ALTO_POS[n] = _at->mode_pos[n];
-    }
-    
-    wtime_s = omp_get_wtime();
-    #pragma omp parallel for schedule(static)
-    for (IType i = 0; i < nnz; i++) {
-        LIT index = _at->idx[i];
-        LIT new_index = 0;
-        for (int n = 0; n < nmode; ++n) {
-            LIT mode_idx = pext(index, ALTO_MASKS[n]);
-            new_index |= (mode_idx << ALTO_POS[n]);
-        }
-        _at->idx[i] = new_index;
-    }
-    //Update the mode masks to match num_bits.
-    for (int n = 0; n < nmode; ++n) {
-        int num_bits = (sizeof(IType) * 8) - clz(_at->dims[n] - 1);
-        _at->mode_masks[n] = ((1 << num_bits) - 1);
-    }
-    wtime = omp_get_wtime() - wtime_s;
-    printf("ALTO: reorder time = %f (s)\n", wtime);
-#ifdef ALTO_DEBUG
-    for (int n = 0; n < nmode; n++) {
-        printf("ALTO_MASKS[%d] = 0x%llx, pos=%d\n", n, _at->mode_masks[n], _at->mode_pos[n]);
-    }
-#endif
+template <typename LIT>
+static inline void
+create_alto(SparseTensor* spt, AltoTensor<LIT>** at, int nprtn)
+{
+    //uint64_t ticks;
+    double wtime_s, wtime;
+
+    gen_alto(spt, at);
+
+    assert(spt->nmodes <= MAX_NUM_MODES);
+    int nmode = spt->nmodes;
+    AltoTensor<LIT>* _at = *at;
+
+#ifdef ALT_PEXT
+    re_encode_alto(_at);
 #endif
 
     //Workload partitioning
+    _at->nprtn = nprtn;
+    _at->prtn_ptr = (IType*)AlignedMalloc((nprtn + 1) * sizeof(IType));
+    assert(_at->prtn_ptr);
+
+    _at->prtn_intervals = (Interval*)AlignedMalloc(nprtn * nmode * sizeof(Interval));
+    assert(_at->prtn_intervals);
+
+    _at->cr_masks = (LIT*)AlignedMalloc(nmode * sizeof(LIT));
+    assert(_at->cr_masks);
+    memset(_at->cr_masks, 0, nmode * sizeof(LIT));
+
+#ifdef OPT_ALTO
+    _at->prtn_id = (LPType*)AlignedMalloc(nprtn * sizeof(LPType));
+    assert(_at->prtn_id);
+    memset(_at->prtn_id, 0, nprtn * sizeof(LPType));
+
+    _at->prtn_mask = (LPType*)AlignedMalloc(nprtn * sizeof(LPType));
+    assert(_at->prtn_mask);
+    memset(_at->prtn_mask, 0, nprtn * sizeof(LPType));
+
+    _at->prtn_mode_masks = (LPType*)AlignedMalloc(nprtn * nmode * sizeof(LPType));
+    assert(_at->prtn_mode_masks);
+    memset(_at->prtn_mode_masks, 0, nprtn * nmode * sizeof(LPType));
+#endif
+
     wtime_s = omp_get_wtime();
     prtn_alto(_at, nprtn);
     wtime = omp_get_wtime() - wtime_s;
     printf("ALTO: prtn time = %f (s)\n", wtime);
-
-    *at = _at;
 }
 
 template <typename LIT>
@@ -719,6 +706,32 @@ static inline void
 sort_alto(AltoTensor<LIT>* at)
 {
     IType nnz = at->nnz;
+    assert(sizeof(LIT) >= sizeof(FType));
+    IType* inds = (IType*) AlignedMalloc(nnz * sizeof(IType));
+    LIT* temp_inds = (LIT*) AlignedMalloc(nnz * sizeof(LIT));
+    FType* temp_val = (FType*) temp_inds;
+    assert(inds);
+    assert(temp_inds);
+
+    #pragma omp parallel for
+    for (IType i = 0; i < nnz; i++) inds[i] = i;
+
+    std::sort(inds, inds + nnz, [at](IType a, IType b) { return at->idx[a] < at->idx[b]; });
+
+    #pragma omp parallel for
+    for (IType i = 0; i < nnz; i++) temp_inds[i] = at->idx[inds[i]];
+    #pragma omp parallel for 
+    for (IType i = 0; i < nnz; i++) at->idx[i] = temp_inds[i];
+    #pragma omp parallel for
+    for (IType i = 0; i < nnz; i++) temp_val[i] = at->vals[inds[i]];
+    #pragma omp parallel for 
+    for (IType i = 0; i < nnz; i++) at->vals[i] = temp_val[i];
+
+    AlignedFree(inds);
+    AlignedFree(temp_inds);
+
+    /*
+    IType nnz = at->nnz;
     APair<LIT>* at_pair = (APair<LIT>*)AlignedMalloc(nnz * sizeof(APair<LIT>));
     assert(at_pair);
 
@@ -737,8 +750,54 @@ sort_alto(AltoTensor<LIT>* at)
         at->vals[i] = at_pair[i].val;
     }
 
-    AlignedFree(at_pair);
+    AlignedFree(at_pair);*/
 }
+
+#ifdef ALT_PEXT
+template <typename LIT>
+static inline void
+re_encode_alto(AltoTensor<LIT>* at)
+{
+    //uint64_t ticks;
+    double wtime_s, wtime;
+
+    assert(at->nmode <= MAX_NUM_MODES);
+    int nmode = at->nmode;
+    IType nnz = at->nnz;
+
+    //local buffers
+    LIT ALTO_MASKS[MAX_NUM_MODES];
+    int ALTO_POS[MAX_NUM_MODES];
+    for (int n = 0; n < nmode; ++n) {
+        ALTO_POS[n] = at->mode_pos[n];
+        ALTO_MASKS[n] = at->mode_masks[n];
+    }
+
+    wtime_s = omp_get_wtime();
+    #pragma omp parallel for schedule(static)
+    for (IType i = 0; i < nnz; i++) {
+        LIT index = at->idx[i];
+        LIT new_index = 0;
+        for (int n = 0; n < nmode; ++n) {
+            LIT mode_idx = pext(index, ALTO_MASKS[n]);
+            new_index |= (mode_idx << ALTO_POS[n]);
+        }
+        at->idx[i] = new_index;
+    }
+    //Update the mode masks to match num_bits.
+    for (int n = 0; n < nmode; ++n) {
+        int num_bits = (sizeof(IType) * 8) - clz(at->dims[n] - 1);
+        at->mode_masks[n] = ((1 << num_bits) - 1);
+    }
+    wtime = omp_get_wtime() - wtime_s;
+    printf("ALTO: reorder time = %f (s)\n", wtime);
+#ifdef ALTO_DEBUG
+    for (int n = 0; n < nmode; n++) {
+        printf("ALTO_MASKS[%d] = 0x%llx, pos=%d\n", n, at->mode_masks[n], at->mode_pos[n]);
+    }
+#endif
+}
+#endif
 
 template <typename LIT>
 static inline void

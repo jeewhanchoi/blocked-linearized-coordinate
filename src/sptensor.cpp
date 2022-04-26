@@ -165,6 +165,7 @@ void ImportSparseTensor(
   SparseTensor** X_
 )
 {
+  printf("Reading in tensor...\n");
   FILE* fp = fopen(file_path, "r");
   assert(fp != NULL);
 

@@ -8,7 +8,7 @@
 
 #include "kruskal_model.hpp"
 
-void ExportKruskalModel(KruskalModel *M, char *file_path)
+void ExportKruskalModel(KruskalModel *M, const char *file_path)
 {
     // factor matrices
     for (int n = 0; n < M->mode; n++) {

@@ -56,6 +56,14 @@ static inline int
 clz(unsigned long long x)
 { return __builtin_clzll(x); }
 
+static inline unsigned long long
+lhalf(unsigned long long x)
+{ return x; }
+
+static inline unsigned long long
+uhalf(unsigned long long x)
+{ return 0; }
+
 #ifndef ALT_PEXT
 static inline unsigned __int128 //__attribute__((target("bmi2")))
 pdep(IType x, unsigned __int128 y)
@@ -106,6 +114,7 @@ pext(unsigned __int128 x, unsigned __int128 y, int pos)
 }
 #endif
 
+
 static inline int
 popcount(unsigned __int128 x)
 { return __builtin_popcountll(x >> 64) + __builtin_popcountll(x & 0xffffffffffffffff); }
@@ -117,6 +126,20 @@ clz(unsigned __int128 x)
   if (!xhi)
     return 64 + __builtin_clzll(x & 0xffffffffffffffff);
   return __builtin_clzll(xhi);
+}
+
+static inline unsigned long long
+lhalf(unsigned __int128 x)
+{
+	unsigned long long y = x & 0xffffffffffffffff;
+	return y;
+}
+
+static inline unsigned long long
+uhalf(unsigned __int128 x)
+{
+	unsigned long long y = (x >> 64) & 0xffffffffffffffff;
+	return y;
 }
 
 #endif

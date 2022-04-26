@@ -12,7 +12,11 @@
 #include "poisson_generator.hpp"
 #include "common.hpp"
 #include "alto.hpp"
+#include "alto_dev.hpp"
 #include "cpd.hpp"
+#include "utils.hpp"
+#include "blco.hpp"
+#include "cpd_gpu.hpp"
 
 #include <unistd.h>
 #include <sys/resource.h>
@@ -24,7 +28,7 @@
 #include <string.h>
 
 #include <sched.h>
-#include <numaif.h>
+//#include <numaif.h>
 
 #if ALTO_MASK_LENGTH == 64
     typedef unsigned long long LIType;
@@ -79,10 +83,17 @@ const struct option long_opt[] = {
     {"file",           1, NULL, 'f'},
     {"check",          0, NULL, 'c'},
     {"bench",          0, NULL, 'p'},
+    {"kernel-id",	   1, NULL, 'k'},
+    {"num-partitions", 1, NULL, 'n'},
+    {"device",         1, NULL, 1001},
+    {"thread-cf",      1, NULL, 1002},
+	{"stream-data",	   0, NULL, 1003},
+	{"max-block-size", 1, NULL, 1004},
+	{"batch",		   0, NULL, 1005},
     {NULL,             0, NULL,    0}
 };
 
-const char* const short_opt = "hvi:o:b:r:m:x:d:t:s:e:f:cp";
+const char* const short_opt = "hvi:o:b:r:m:x:d:t:s:e:f:cpk:n:b:";
 const char* version_info = "0.1.1";
 
 int main(int argc, char** argv)
@@ -100,7 +111,7 @@ int main(int argc, char** argv)
 	IType rank = 16;
 	std::vector<IType> dims;
 	int nmodes = 0;
-	int target_mode = -1;
+	int target_mode = 0;
 	std::string text_file;
 	std::string text_file_out;
 	std::string binary_file;
@@ -110,6 +121,13 @@ int main(int argc, char** argv)
 	int save_to_file = 0;
     bool do_check = false;
     bool do_mttkrp_bench = false;
+    int kernel_id = 0;
+    int num_partitions = omp_get_max_threads();
+    int device = 0;
+    IType thread_cf = 2;
+	IType max_block_size = 16777216;
+	bool stream_data = false;
+	bool do_batching = false;
 
 	int c = 0;
 	while ((c = getopt_long(argc, argv, short_opt, long_opt, NULL)) != -1) {
@@ -168,7 +186,7 @@ int main(int argc, char** argv)
 			break;
 		case 'e':
 			epsilon = atof(optarg);
-			if (epsilon <= 0.0) {
+			if (epsilon < 0.0) {
 				fprintf(stderr, "Invalid -epsilon: %s.\n", optarg);
 			}
 			break;
@@ -184,6 +202,51 @@ int main(int argc, char** argv)
         case 'p':
             do_mttkrp_bench = true;
             break;
+        case 'k':
+            kernel_id = atoi(optarg);
+            if (kernel_id < 0) {
+                fprintf(stderr, "Invalid -kernel-id: %s.\n", optarg);
+                return -1;
+            }
+//            if (kernel_id > 0) {
+//                do_mttkrp_bench = false;
+//                do_check = false;
+//            }
+            break;
+        case 'n':
+            num_partitions = atoi(optarg);
+            if (num_partitions <= 0) {
+                fprintf(stderr, "Invalid -num-partitions: %s.\n", optarg);
+                return -1;
+            }
+            break;
+        case 1001:
+            device = atoi(optarg);
+            if (device < 0) {
+                fprintf(stderr, "Invalid -device: %s.\n", optarg);
+                return -1;
+            }
+            break;
+        case 1002:
+            thread_cf = atoi(optarg);
+            if (thread_cf <= 0) {
+                fprintf(stderr, "Invalid -thread-cf: %s.\n", optarg);
+                return -1;
+            }
+            break;
+		case 1003:
+			stream_data = true;
+			break;
+		case 1004:
+            max_block_size = atoi(optarg);
+            if (max_block_size <= 0) {
+                fprintf(stderr, "Invalid -max-block-size: %s.\n", optarg);
+                return -1;
+            }
+            break;
+		case 1005:
+			do_batching = true;
+			break;
 		case ':':
 			fprintf(stderr, "Option -%c requires an argument.\n", optopt);
 			return -1;
@@ -255,6 +318,73 @@ int main(int argc, char** argv)
 
 		}
 	}
+
+    // GPU driver
+    if (kernel_id) {
+        if (do_check) max_iters = 1;
+        check_cuda(cudaSetDevice(device), "cudaSetDevice");
+
+		if (!stream_data) max_block_size = X->nnz;
+		blcotensor* tensor = gen_blcotensor_host<LIType>(X, max_block_size);
+
+        //setup
+        PrintTensorInfo(rank, max_iters, X);
+        KruskalModel* M;
+        CreateKruskalModel(X->nmodes, X->dims, rank, &M);
+        KruskalModelRandomInit(M, (unsigned int)seed);
+
+        if (do_check) {
+			if (!do_mttkrp_bench) printf("Warning: check not implemented for CPD. Checking MTTKRP instead\n");
+
+            // Create factors for ground truth
+            FType **truth = (FType **) AlignedMalloc(X->nmodes * sizeof(FType*));
+            FType **factors = (FType **) AlignedMalloc(X->nmodes * sizeof(FType*));
+            assert(truth);
+            assert(factors);
+            for (int m = 0; m < X->nmodes; m++) {
+                truth[m] = (FType *) AlignedMalloc(X->dims[m] * rank * sizeof(FType));
+                factors[m] = (FType *) AlignedMalloc(X->dims[m] * rank * sizeof(FType));
+                assert(truth[m]);
+                assert(factors[m]);
+            }
+            // Initialize factors
+            for (int m = 0; m < X->nmodes; ++m) {
+                memcpy(factors[m], M->U[m], X->dims[m] * rank * sizeof(FType));
+            }
+            // Do base mttkrp
+            printf("===Do base run===\n");
+            mttkrp(X, M, (IType) target_mode);
+            printf("--> MTTKRP sequential base run done.\n");
+            // Copy to ground truth and reset
+            for (int m = 0; m < X->nmodes; ++m) {
+                memcpy(truth[m], M->U[m], X->dims[m] * rank * sizeof(FType));
+                memcpy(M->U[m], factors[m], X->dims[m] * rank * sizeof(FType));
+            }
+
+            printf("===Do ALTO GPU run===\n");
+            mttkrp_alto_dev<IType>(tensor, M, kernel_id, max_iters, target_mode, thread_cf, stream_data, do_batching, num_partitions);
+            printf("MTTKRP ALTO GPU run done.\n");
+
+            // Verify ALTO
+            printf("===Verify ALTO-DEV MTTKRP=== (target mode: %d)\n", target_mode);
+            for (int m = 0; m < X->nmodes; ++m) {
+                printf("mode %d: ", m);
+                fflush(stdout);
+                VerifyResult("mttkrp_alto_dev", truth[m], M->U[m], tensor->modes[m] * rank);
+            }
+        }//do_check
+        else {
+            if (do_mttkrp_bench) mttkrp_alto_dev<IType>(tensor, M, kernel_id, max_iters, target_mode, thread_cf, stream_data, do_batching, num_partitions);
+			else cpals_blco_dev(tensor, M, max_iters, epsilon, kernel_id, stream_data, do_batching, thread_cf, num_partitions);
+			if (text_file_out != "") {
+				ExportKruskalModel(M, text_file_out.c_str());
+				printf("--> Kruskal model saved to %s\n", text_file_out.c_str());
+			}
+        }//do_check
+
+        return 0; // Premature quit
+    }
+
     // if check flag is given, only do this
     if (do_check) {
         RunAltoCheck(X, rank, seed, target_mode, omp_get_max_threads());
@@ -298,7 +428,7 @@ int main(int argc, char** argv)
 
 	// Convert COO to ALTO
 	AltoTensor<LIType>* AT;
-	int num_partitions = omp_get_max_threads();
+	//int num_partitions = omp_get_max_threads();
 	create_alto(X, &AT, num_partitions);
 
     BEGIN_TIMER(&ticks_start);
@@ -520,10 +650,11 @@ void VerifyResult(const char* name, FType* truth, FType* factor, IType size)
 	IType cnt = 0;
 	if (truth != NULL) {
 		for (IType i = 0; i < size; ++i) {
-			if (fabs(truth[i] - factor[i]) > 1.0e-6) {
+            FType moe = std::max(std::abs(truth[i]) * 1e-6, 1e-6); // Scaled margin of error
+			if (fabs(truth[i] - factor[i]) > moe) {
 				cnt++;
+				//printf("Mismatch at %d: truth %f vs factor %f\n", i, truth[i], factor[i]);
 			}
-			// printf("%f %f\n", truth[i], factor[i]);
 		}
 	}
 	else {
@@ -608,6 +739,14 @@ static void Usage(char* call)
 	fprintf(stderr, "\t-s or --sparsity     Sparsity of generate tensor\n");
     fprintf(stderr, "\t-c or --check        Run ALTO (par) validation against cpd MTTKRP\n");
     fprintf(stderr, "\t-p or --bench        Run ALTO (par) MTTKRP benchmark with the given CMD line options\n");
+    
+	fprintf(stderr, "\t-k or --kernel-id    If nonzero, the ID of the GPU kernel to run (10 for auto)\n");
+    fprintf(stderr, "\t-n or --num-partitions Number of partitions\n");
+    fprintf(stderr, "\t--device 			CUDA device ordinal\n");
+    fprintf(stderr, "\t--thread-cf 			Thread coarsening factor\n");
+	fprintf(stderr, "\t--stream-data		If set, stream data to GPU during computation\n");
+	fprintf(stderr, "\t--max-block-size		Block memory reservation on GPU\n");
+	fprintf(stderr, "\t--batch		If set, level 1 kernel batching will be enabled\n");
 }
 
 static void PrintTensorInfo(IType rank, int max_iters, SparseTensor* X)

@@ -8,6 +8,28 @@ By default, the Intel ICPC compiler is used.
 
 The code currently requires either Intel MKL or OpenBlas available on the system. See [Settings](#settings) for more configuration options.
 
+## MTTKRP on GPU instructions
+
+To compile and run: update include_*.mk to include CUDA libs
+
+Important parameters:
+ - k is kernel ID
+ - n is number of partitions (thread blocks)
+ - device is device ordinal
+ - stream-data is flag to stream data to GPU during MTTKRP
+ - max_block_size is maximum BLCO block size
+ - batch is flag to batch level 1 kernels
+
+Kernel IDs:
+
+ - 1: Lvl1
+ - 2: Lvl2
+ - 3: Lvl3
+ - 10: automatic selection
+ - 11: lvl 1 batched (slower)
+ - 12: lvl 1 batched (faster)
+ - 13: Atomic
+
 ## Usage
 You can perform CPD on a given tensor like this:
 ```bash
@@ -59,12 +81,15 @@ For getting specific information about the memory access patterns in particular 
 
 
 ## Contributors
+#### Intel Labs
 * Ahmed E. Helal (ahmed.helal@intel.com)
 * Jan Laukemann  (jan.laukemann@intel.com)
 * Fabio Checconi (fabio.checconi@intel.com)
 * Jesmin Jahan Tithi (jesmin.jahan.tithi@intel.com)
-* Jeewhan Choi (jeec@uoregon.edu)
+#### University of Oregon
+* Andy Nguyen (andyn@uoregon.edu)
 * Yongseok Soh (ysoh@uoregon.edu)
+* Jeewhan Choi (jeec@uoregon.edu)
 
 ## Licensing
 ALTO is released under the MIT License. Please see the 'LICENSE' file for details.
