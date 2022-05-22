@@ -382,6 +382,10 @@ int main(int argc, char** argv)
 			}
         }//do_check
 
+		// Cleanup
+		DestroySparseTensor(X);
+		delete_blcotensor_host(tensor);
+
         return 0; // Premature quit
     }
 

@@ -214,7 +214,7 @@ static inline blcotensor* gen_blcotensor_host(SparseTensor* spt, IType max_block
 
     check_cuda(cudaMallocHost(&X->coords, sizeof(IType) * nnz), "cudaMallocHost coords"); // Pinned mem
     check_cuda(cudaMallocHost(&X->values, sizeof(FType) * nnz), "cudaMallocHost values");
-    memcpy(X->modes, _at->dims, nmode * sizeof(IType));
+    for (IType i = 0; i < nmode; i++) X->modes[i] = _at->dims[i];
     X->mode_pos = new int[X->N];
     X->mode_masks = new IType[X->N];
 
@@ -264,6 +264,7 @@ static inline blcotensor* gen_blcotensor_host(SparseTensor* spt, IType max_block
     wtime_s = omp_get_wtime();
     IType total_blocks_split = 0;
     block_prefix_sum[0] = 0;
+    if (max_block_size <= 0) max_block_size = nnz;
     for (IType i = 0; i < block_count; i++) {
         // ceil(block_histogram / max_block_size)
         total_blocks_split += (block_histogram[i] + max_block_size - 1) / max_block_size;
