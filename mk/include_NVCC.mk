@@ -1,8 +1,8 @@
 NVCC       = nvcc -gencode=arch=compute_70,code=sm_70
 
 CUOPENMP   = -Xcompiler -fopenmp
-#CUDA = /usr/local/cuda
-CUDA =/swtools/cuda/latest
+CUDA = /usr/local/cuda
+#CUDA =/swtools/cuda/latest
 CUBLAS_LIBS = -L$(CUDA)/lib64 -lcudart -lcublas -lcusolver -lcurand
 CUDA_INCLUDE = $(CUDA)/include
 
