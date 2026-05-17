@@ -1,11 +1,10 @@
 CXX       = g++
-LINKER   = $(CC)
 
 OPENMP   = -fopenmp
 ifeq ($(BLAS_LIBRARY),MKL)
 BLASCFLAGS = -DMKL_ILP64
 BLASINC  = -I$(MKLROOT)/include
-BLASLIBS = -L$(MKLROOT)/lib/intel64 -lmkl_intel_ilp64 -lmkl_intel_thread -lmkl_core -liomp5
+BLASLIBS = -L$(MKLROOT)/lib/intel64 -lmkl_intel_ilp64 -lmkl_gnu_thread -lmkl_core -lgomp
 else
 BLASCFLAGS =
 BLASINC  = -I/usr/include/openblas

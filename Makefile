@@ -49,7 +49,7 @@ CPPFLAGS  := $(CPPFLAGS) $(DEFINES) $(OPTIONS) $(INCLUDES)
 
 $(TARGET): $(BUILD_DIR) $(OBJ) $(CUOBJ)
 	@echo "===>  LINKING  $(TARGET)"
-	$(CXX) $(LFLAGS) -o $(TARGET) $(OBJ) $(LIBS) $(CUOBJ) $(LIBS) $(NVCCLIBS)
+	$(CXX) $(LFLAGS) -o $(TARGET) $(OBJ) $(CUOBJ) $(LIBS) $(NVCCLIBS)
 
 asm: $(BUILD_DIR) $(ASM)
 
