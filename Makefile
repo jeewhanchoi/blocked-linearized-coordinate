@@ -58,7 +58,7 @@ info:
 	$(CXX) $(VERSION)
 
 $(BUILD_DIR)/%.d: $(SRC_DIR)/%.cpp | build_dir
-	$(Q)$(CXX) $(CPPFLAGS) -MT $(@:.d=.o) -MM  $< > $@
+	$(Q)$(CXX) $(CPPFLAGS) $(NVCCINCLUDES) -MT $(@:.d=.o) -MM  $< > $@
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@echo "===>  COMPILE  $@"

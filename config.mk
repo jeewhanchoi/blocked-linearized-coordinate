@@ -4,10 +4,12 @@
 #################################################################
 #################################################################
 
-# Supported: ICC, GCC
+# Supported: ICC, GCC, ICPX
 COMPILER = GCC
+# COMPILER = ICPX
 # Supported: MKL, OPENBLAS
 BLAS_LIBRARY = OPENBLAS
+# BLAS_LIBRARY = MKL
 
 # either 64 or 128
 ALTO_MASK_LENGTH = 64

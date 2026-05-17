@@ -128,7 +128,7 @@ inline void* HPMalloc(size_t nbytes) {
             PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE | MAP_HUGETLB,
             -1, 0);
     }
-    if ((ret_ptr == (void *)(-1))) {
+    if (ret_ptr == (void *)(-1)) {
         fprintf(stderr,"mmap call failed\n");
         exit(1);
     }

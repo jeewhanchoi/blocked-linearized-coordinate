@@ -223,7 +223,6 @@ double cpd_fit_alto(AltoTensor<LIT>* AT, KruskalModel* M, FType** grams, FType* 
   assert(tmp_gram);
 
   #pragma omp parallel for schedule(static)
-  #pragma unroll
   for(IType i = 0; i < rank; ++i) {
     #pragma omp simd
     for(IType j = 0; j < i + 1; ++j) {

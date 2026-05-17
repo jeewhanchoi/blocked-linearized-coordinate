@@ -322,7 +322,7 @@ blcotensor* gen_blcotensor_host(SparseTensor* spt, IType max_block_size) {
 
     wtime = omp_get_wtime() - wtime_s;
     printf("BLCO: Blocking time = %f (s)\n", wtime);
-    printf("Total blocks: %d\n\n", total_blocks_split);
+    printf("Total blocks: %llu\n\n", total_blocks_split);
 
     destroy_alto(_at);
     delete [] block_histogram;

@@ -1,9 +1,12 @@
-NVCC           = nvcc -gencode=arch=compute_90,code=sm_90
+# For H100
+# NVCC           = nvcc -gencode=arch=compute_90,code=sm_90
+# For A100
+NVCC           = nvcc -gencode=arch=compute_80,code=sm_80
 CUDA_HOST_CXX  = g++
 
 CUOPENMP   = -Xcompiler -fopenmp
 CUDA = /usr/local/cuda
-#CUDA =/swtools/cuda/latest
+#CUDA = /packages/cuda/12.4.1
 CUBLAS_LIBS = -L$(CUDA)/lib64 -lcudart -lcublas -lcusolver -lcurand
 CUDA_INCLUDE = $(CUDA)/include
 
