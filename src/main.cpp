@@ -93,7 +93,7 @@ const struct option long_opt[] = {
     {NULL,             0, NULL,    0}
 };
 
-const char* const short_opt = "hvi:o:b:r:m:x:d:t:s:e:f:cpk:n:b:";
+const char* const short_opt = "hvi:o:b:r:m:x:d:t:s:e:f:cpk:n:";
 const char* version_info = "0.1.1";
 
 int main(int argc, char** argv)
@@ -441,6 +441,11 @@ int main(int argc, char** argv)
     END_TIMER(&ticks_end);
     ELAPSED_TIME(ticks_start, ticks_end, &t_cpd);
     PRINT_TIMER("CPD (ALTO)", t_cpd);
+
+    if (text_file_out != "") {
+        ExportKruskalModel(M, text_file_out.c_str());
+        printf("Kruskal model saved to %s\n", text_file_out.c_str());
+    }
 
     // Cleanup
 	DestroySparseTensor(X);

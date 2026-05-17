@@ -5,9 +5,9 @@
 #################################################################
 
 # Supported: ICC, GCC
-COMPILER = ICC
+COMPILER = GCC
 # Supported: MKL, OPENBLAS
-BLAS_LIBRARY = MKL
+BLAS_LIBRARY = OPENBLAS
 
 # either 64 or 128
 ALTO_MASK_LENGTH = 64

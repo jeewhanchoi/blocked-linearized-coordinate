@@ -194,7 +194,7 @@ void delete_blcotensor_host(blcotensor* block);
 
 
 template <typename LIT>
-static inline blcotensor* gen_blcotensor_host(SparseTensor* spt, IType max_block_size) {
+blcotensor* gen_blcotensor_host(SparseTensor* spt, IType max_block_size) {
     double wtime_s, wtime;
 
     // Init ALTO

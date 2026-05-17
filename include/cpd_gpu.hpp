@@ -2,7 +2,11 @@
 #pragma once
 #include "cusolverDn.h"
 #include "cublas_v2.h"
+#ifdef MKL
+#include <mkl.h>
+#else
 #include "cblas.h"
+#endif
 
 
 // Computes the CANDECOMP/PARAFAC decomposition of a tensor with the alternating least squares algorithm
