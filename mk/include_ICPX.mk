@@ -1,5 +1,4 @@
 CXX      = icpx
-LINKER   = $(CXX)
 
 OPENMP   = -fiopenmp
 ifeq ($(BLAS_LIBRARY),MKL)
