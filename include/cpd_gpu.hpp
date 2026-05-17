@@ -124,8 +124,24 @@ void pseudoinverse_gpu(cusolverDnHandle_t cusolverHandle, cublasHandle_t cublasH
 //  - mat: the `mode_length` x `rank` matrix to normalize
 //  - rank: The width of the matrix
 //  - mode_length: the height of the matrix
-//  - lambda: the vector to store norms in (will be overwritten)
+//  - lambda: the vector to store norms in (must be zeroed before call; will be overwritten)
 void columnwise_normscal(cudaStream_t stream, IType blocks, FType* mat, IType rank, IType mode_length, FType* lambda);
+
+
+// Performs columnwise max-norm normalization on a matrix, storing norms in a given vector.
+// Lambda for each column is max(max_positive_column_value, 1.0), matching the CPU MatMaxNorm
+// and Tensor Toolbox conventions. Lambda must be zeroed before calling.
+//
+// The stream will not be synchronized.
+//
+// Parameters:
+//  - stream: a handle to the stream to run this routine on
+//  - blocks: the number of CUDA blocks to create
+//  - mat: the `mode_length` x `rank` matrix to normalize
+//  - rank: The width of the matrix
+//  - mode_length: the height of the matrix
+//  - lambda: the vector to store norms in (must be zeroed before call; will be overwritten)
+void columnwise_maxnormscal(cudaStream_t stream, IType blocks, FType* mat, IType rank, IType mode_length, FType* lambda);
 
 
 // Performs the routine C <-- A^T * A, GPU side

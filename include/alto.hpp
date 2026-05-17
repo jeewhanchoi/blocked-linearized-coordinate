@@ -117,6 +117,9 @@ gen_alto(SparseTensor* spt, AltoTensor<LIT>** at)
 
     AltoTensor<LIT>* _at = (AltoTensor<LIT>*)AlignedMalloc(sizeof(AltoTensor<LIT>));
     assert(_at);
+    // AlignedMalloc uses malloc, not new, so default member initializers (e.g. =nullptr) don't run.
+    // Zero the struct so all pointer fields are NULL and destroy_alto can safely free them.
+    memset(_at, 0, sizeof(AltoTensor<LIT>));
 
     _at->nmode = nmode;
     _at->nnz = nnz;

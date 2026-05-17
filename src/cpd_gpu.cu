@@ -16,6 +16,7 @@ static const FType zero = 0.0;
 using namespace cooperative_groups;
 
 __global__ void columnwise_normscal_kernel(FType* mat, IType rank, IType mode_length, FType* lambda);
+__global__ void columnwise_maxnormscal_kernel(FType* mat, IType rank, IType mode_length, FType* lambda);
 __global__ void columnwise_inner_product_kernel(FType* U, FType* V, FType* output, IType rank, IType mode_length);
 
 FType cpals_blco_dev(blcotensor* at_host, KruskalModel* A, int maxiter, FType tolerance, int kernel, bool stream_data, bool do_batching, int thread_cf, int nprtn) {
@@ -118,13 +119,15 @@ FType cpals_blco_dev(blcotensor* at_host, KruskalModel* A, int maxiter, FType to
     check_cuda(cudaStreamSynchronize(v_stream), "cudaStreamSynchronize grams");
 
     // Get device info
-    int device_id = 0, normscal_kernel_blocks = 0, iprod_kernel_blocks = 0;
+    int device_id = 0, normscal_kernel_blocks = 0, maxnormscal_kernel_blocks = 0, iprod_kernel_blocks = 0;
     check_cuda(cudaGetDevice(&device_id), "cudaGetDevice");
     cudaDeviceProp deviceProp;
     cudaGetDeviceProperties(&deviceProp, device_id);
     cudaOccupancyMaxActiveBlocksPerMultiprocessor(&normscal_kernel_blocks, columnwise_normscal_kernel, BLOCK_SIZE, R * sizeof(FType));
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxnormscal_kernel_blocks, columnwise_maxnormscal_kernel, BLOCK_SIZE, R * sizeof(FType));
     cudaOccupancyMaxActiveBlocksPerMultiprocessor(&iprod_kernel_blocks, columnwise_inner_product_kernel, BLOCK_SIZE, R * sizeof(FType));
     normscal_kernel_blocks *= deviceProp.multiProcessorCount;
+    maxnormscal_kernel_blocks *= deviceProp.multiProcessorCount;
     iprod_kernel_blocks *= deviceProp.multiProcessorCount;
 
     // Init GPU timers
@@ -176,8 +179,13 @@ FType cpals_blco_dev(blcotensor* at_host, KruskalModel* A, int maxiter, FType to
                     at_host->modes[n], R, &one, V, R, mttkrp_res, R, &zero, M_dev->U[n], R), "cublasDgemm");
             #endif
 
-            // Normalize, only supports L2 for now
-            columnwise_normscal(v_stream, normscal_kernel_blocks, M_dev->U[n], R, at_host->modes[n], M_dev->lambda);
+            // Normalize: L2 on first iteration, max-norm thereafter (matches CPU/Tensor Toolbox)
+            check_cuda(cudaMemsetAsync(M_dev->lambda, 0, sizeof(FType) * R, v_stream), "cudaMemset lambda");
+            if (count == 0) {
+                columnwise_normscal(v_stream, normscal_kernel_blocks, M_dev->U[n], R, at_host->modes[n], M_dev->lambda);
+            } else {
+                columnwise_maxnormscal(v_stream, maxnormscal_kernel_blocks, M_dev->U[n], R, at_host->modes[n], M_dev->lambda);
+            }
 
             // Update grams again
             ata_gpu(cublasHandle, v_stream, M_dev->U[n], grams[n], at_host->modes[n], R);
@@ -295,12 +303,83 @@ void columnwise_normscal(cudaStream_t stream, IType blocks, FType* mat, IType ra
     IType stack_rank = rank;
     IType stack_mode_length = mode_length;
     FType* stack_lambda = lambda;
-    
+
     IType shared_mem = rank * sizeof(FType);
     void *kernel_args[] = {&stack_mat, &stack_rank, &stack_mode_length, &stack_lambda};
     dim3 dimBlock(BLOCK_SIZE, 1, 1);
     dim3 dimGrid(blocks, 1, 1);
     check_cuda(cudaLaunchCooperativeKernel((void*) columnwise_normscal_kernel, dimGrid, dimBlock, kernel_args, shared_mem, stream), "columnwise_normscal_kernel launch");
+}
+
+
+// Max-norm kernel: lambda[col] = max(max_positive_value_in_col, 1.0), matching CPU MatMaxNorm.
+// Uses bit-reinterpretation atomicMax (valid for non-negative IEEE 754 values).
+__global__ void columnwise_maxnormscal_kernel(FType* mat, IType rank, IType mode_length, FType* lambda) {
+    extern __shared__ FType s_lambda[];
+    thread_block tb = this_thread_block();
+    grid_group grid = this_grid();
+    IType lane = tb.thread_index().x;
+    IType global_id = grid.thread_rank();
+
+    for (IType i = lane; i < rank; i += tb.size()) s_lambda[i] = 0.0;
+    tb.sync();
+
+    // Block-local max of positive values (negative values ignored, matching CPU init=0 behavior)
+    for (IType i = global_id; i < rank * mode_length; i += grid.size()) {
+        IType col = i % rank;
+        FType val = mat[i];
+        if (val > 0) {
+#ifdef USE_32BIT_TYPE
+            atomicMax((unsigned int*)(s_lambda + col), __float_as_uint(val));
+#else
+            atomicMax((unsigned long long*)(s_lambda + col), (unsigned long long)__double_as_longlong(val));
+#endif
+        }
+    }
+    tb.sync();
+
+    // Reduce block max into global lambda
+    for (IType i = lane; i < rank; i += tb.size()) {
+        FType val = s_lambda[i];
+        if (val > 0) {
+#ifdef USE_32BIT_TYPE
+            atomicMax((unsigned int*)(lambda + i), __float_as_uint(val));
+#else
+            atomicMax((unsigned long long*)(lambda + i), (unsigned long long)__double_as_longlong(val));
+#endif
+        }
+    }
+    grid.sync();
+
+    // Clamp to >= 1.0 (matches CPU: lambda = max(lambda, 1.0))
+    if (global_id < rank) {
+        lambda[global_id] = max(lambda[global_id], (FType)1.0);
+    }
+    grid.sync();
+
+    // Load reciprocals into shared memory for column scaling
+    for (IType i = lane; i < rank; i += tb.size()) {
+        FType l = lambda[i];
+        s_lambda[i] = (l == 0.0) ? 0.0 : (FType)1.0 / l;
+    }
+    tb.sync();
+
+    for (IType i = global_id; i < rank * mode_length; i += grid.size()) {
+        IType col = i % rank;
+        mat[i] *= s_lambda[col];
+    }
+}
+void columnwise_maxnormscal(cudaStream_t stream, IType blocks, FType* mat, IType rank, IType mode_length, FType* lambda) {
+    FType* stack_mat = mat;
+    IType stack_rank = rank;
+    IType stack_mode_length = mode_length;
+    FType* stack_lambda = lambda;
+
+    IType shared_mem = rank * sizeof(FType);
+    void *kernel_args[] = {&stack_mat, &stack_rank, &stack_mode_length, &stack_lambda};
+    dim3 dimBlock(BLOCK_SIZE, 1, 1);
+    dim3 dimGrid(blocks, 1, 1);
+    check_cuda(cudaLaunchCooperativeKernel((void*) columnwise_maxnormscal_kernel, dimGrid, dimBlock, kernel_args, shared_mem, stream), "columnwise_maxnormscal_kernel launch");
 }
 
 
